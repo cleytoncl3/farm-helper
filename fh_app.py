@@ -262,6 +262,9 @@ class App:
         self.theme_btn = tk.Button(top, text="☀", font=self.font(12), relief="flat", bd=0, width=3, cursor="hand2", command=self.toggle_theme)
         self.reg(self.theme_btn, bg="panel2", fg="fg", activebackground="border", activeforeground="fg")
         self.theme_btn.pack(side="right")
+        self.upd_btn = tk.Button(top, text="Atualizar", font=self.font(9, True), relief="flat", bd=0, padx=10, pady=6, cursor="hand2", command=self.on_update)
+        self.reg(self.upd_btn, bg="panel2", fg="fg", activebackground="border", activeforeground="fg")
+        self.upd_btn.pack(side="right", padx=(0, 6))
         self.start_btn = tk.Button(top, text="Iniciar", relief="flat", bd=0, padx=18, pady=6, cursor="hand2", font=self.font(10, True), command=self.on_start_stop)
         self.start_btn.pack(side="right", padx=8)
         # abas
@@ -629,6 +632,45 @@ class App:
         elif self.state == "stopped":
             self.start_bot()
 
+    # ------------------------------------------------------------------ atualização
+    def on_update(self) -> None:
+        if getattr(self, "updating", False):
+            return
+        self.updating = True
+        self.upd_btn.configure(text="Verificando...", state="disabled")
+        threading.Thread(target=self._update_worker, daemon=True).start()
+
+    def _update_done(self) -> None:
+        self.updating = False
+        self.upd_btn.configure(text="Atualizar", state="normal")
+
+    def _update_worker(self) -> None:
+        try:
+            spec = importlib.util.spec_from_file_location("updater", HERE / "updater.py")
+            up = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(up)
+            self.q.put(("sys", "Procurando atualização no GitHub..."))
+            has, cur, new = up.check(HERE)
+            if not has:
+                self.q.put(("sys", f"Você já está na versão mais recente ({new[:7]})."))
+                return
+            if not self.ask("Atualizar o Farm Helper",
+                            f"Há uma versão nova ({new[:7]}). Atualizar agora?\n\nSua calibração, módulos e configurações são mantidos."
+                            + ("\n\nO bot está rodando: a versão nova só vale depois de parar e iniciar de novo." if self.state != "stopped" else "")):
+                self.q.put(("sys", "Atualização cancelada."))
+                return
+            changed = up.apply(HERE, new, log=lambda t: self.q.put(("sys", t)))
+            if changed:
+                self.q.put(("sys", "Atualizado: " + ", ".join(changed[:12]) + (" ..." if len(changed) > 12 else "")))
+            if any(c in ("fh_app.py", "fh_icon.ico") for c in changed):
+                self.q.put(("sys", "A janela do app também mudou: feche e abra o Farm Helper de novo para ver."))
+            self.q.put(("sys", "Pronto. Para usar a versão nova: pare o bot e clique em Iniciar."
+                        if self.state != "stopped" else "Pronto. A versão nova será usada ao clicar em Iniciar."))
+        except Exception as e:  # noqa: BLE001
+            self.q.put(("sys_err", f"Falha ao atualizar: {type(e).__name__}: {e}"))
+        finally:
+            self.q.put(("upd_done",))
+
     def external_running(self) -> bool:
         return self.proc is None and port_taken(BOT_LOCK_PORT)
 
@@ -858,6 +900,8 @@ class App:
                 elif kind == "ask":
                     item[3]["ans"] = messagebox.askyesno(item[1], item[2])
                     item[3]["ev"].set()
+                elif kind == "upd_done":
+                    self._update_done()
                 elif kind == "cal":
                     self._cal_line(item[1], item[2])
                 elif kind == "cal_done":

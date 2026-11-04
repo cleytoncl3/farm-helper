@@ -153,3 +153,6 @@ A imagem calibracao_preview.png mostra o contorno da land reconhecida (branco), 
   ignorada por 1 h e o plantio usa outra cultura. Nada e comprado sem achar a semente.
 - Saco de sementes: antes de comprar, o bot confere NA TELA que o tile onde vai soltar o saco existe e esta livre (o jogo desenha
   tracinhos brancos so em tiles livres sob o mouse); depois de comprar, confere que o saco apareceu na grama antes de plantar.
+## 13. Atualizar o Farm Helper
+
+Clique em **Atualizar** (canto superior direito do app). Ele confere se há versão nova no GitHub, pergunta se quer atualizar, baixa e troca os arquivos do programa. Sua calibração, módulos, configurações e logs são mantidos. Depois de atualizar, pare o bot e clique em Iniciar para usar a versão nova. Se o app em si mudou, feche e abra o Farm Helper de novo (quem usa o .exe precisa gerar o .exe novamente com build_exe.bat para ver mudanças na janela).
