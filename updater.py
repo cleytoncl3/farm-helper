@@ -21,7 +21,7 @@ VERSION_FILE = "version.txt"
 # arquivos do usuário: nunca sobrescritos, mesmo que existam no repositório
 PROTECTED = {
     "calibracao.json", "calibracao_preview.png", "config_usuario.json", "game_url.txt", "python.txt", "browser.json",
-    "app_prefs.json", "memory.json", "bot.log", "STOP", VERSION_FILE, "Farm Helper.exe",
+    "app_prefs.json", "memory.json", "bot.log", "STOP", VERSION_FILE, "Farm Helper.exe.old",
 }
 PROTECTED_DIRS = {"profile", ".venv", "__pycache__", ".git", "build_tmp"}
 UA = {"User-Agent": "farm-helper-updater"}
@@ -75,10 +75,18 @@ def apply(folder: Path, new_sha: str | None = None, log=print) -> list[str]:
             tmp.write_bytes(blob)
             try:
                 tmp.replace(dest)
-            except PermissionError:                       # arquivo em uso (ex.: o próprio .exe): deixa para depois
-                tmp.unlink(missing_ok=True)
-                log("Não consegui trocar %s (em uso); feche o app e atualize de novo" % rel)
-                continue
+            except PermissionError:
+                # arquivo em uso (o .exe aberto): o Windows deixa RENOMEAR um .exe em execução; põe o novo no lugar
+                old = dest.with_name(dest.name + ".old")
+                try:
+                    old.unlink(missing_ok=True)
+                    dest.rename(old)
+                    tmp.replace(dest)
+                    log("%s trocado; feche e abra o app para usar a versão nova" % rel)
+                except OSError:
+                    tmp.unlink(missing_ok=True)
+                    log("Não consegui trocar %s (em uso); feche o app e atualize de novo" % rel)
+                    continue
             changed.append(rel)
     (folder / VERSION_FILE).write_text(new_sha, encoding="utf-8")
     log("Arquivos atualizados: %d" % len(changed))
