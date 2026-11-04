@@ -116,7 +116,7 @@ Abra o atalho **Farm Helper** (ou `configurar.bat`). E uma janelinha com:
 - **Construcoes**: chaves para ligar/desligar cada rotina (o que estiver desligado o bot pula).
 - **Calibracao**: botao "Calibrar agora" com barra de progresso e cada etapa escrita; a calibracao fica salva.
 
-Para gerar o `Farm Helper.exe` (nao vai no GitHub): rode `build_exe.bat`. Sem o .exe, o atalho usa `pythonw fh_app.py`.
+O `Farm Helper.exe` ja vem no GitHub (so abrir). Para gerar um novo: `build_exe.bat`. Sem o .exe, o atalho usa `pythonw fh_app.py`.
 O app so abre/para o bot (`main.py`); fechar o app pergunta e para o bot.
 
 
@@ -155,4 +155,4 @@ A imagem calibracao_preview.png mostra o contorno da land reconhecida (branco), 
   tracinhos brancos so em tiles livres sob o mouse); depois de comprar, confere que o saco apareceu na grama antes de plantar.
 ## 13. Atualizar o Farm Helper
 
-Clique em **Atualizar** (canto superior direito do app). Ele confere se ha versao nova no GitHub, pergunta se quer atualizar, baixa e troca os arquivos do programa. Sua calibracao, modulos, configuracoes e logs sao mantidos. Depois de atualizar, pare o bot e clique em Iniciar para usar a versao nova. O `Farm Helper.exe` nao vai no GitHub; quem abre pelo `configurar.bat` usa o mesmo app (`fh_app.py`) e ja recebe as mudancas da janela ao reabrir. Quem usa o .exe precisa gerar de novo com `build_exe.bat`.
+Clique em **Atualizar** (canto superior direito do app). Ele confere se ha versao nova no GitHub, pergunta se quer atualizar, baixa e troca os arquivos do programa. Sua calibracao, modulos, configuracoes e logs sao mantidos. Depois de atualizar, pare o bot e clique em Iniciar para usar a versao nova. O `Farm Helper.exe` tambem e atualizado (se ele estiver aberto, feche e abra de novo para usar o novo).
