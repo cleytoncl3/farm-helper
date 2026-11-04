@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+profile/
+calibration.json
+landmark.png
+state.json
+bot.log
+STOP
+.venv/
+memory.json
+*.log
+browser.json
+python.txt
+calibracao.json
+calibracao_preview.png
+config_usuario.json
+
+app_prefs.json
+build_tmp/
+shot_*.png
+Farm Helper.exe
+game_url.txt

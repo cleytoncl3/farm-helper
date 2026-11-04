@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Farm Helper · Configuração</title>
+<style>
+  :root{
+    --bg:#0e1424; --bg2:#141b30; --card:#192240; --card2:#1f2a4d; --line:#2a3660; --txt:#eef2ff; --mut:#9aa6cf;
+    --acc:#5b8cff; --acc2:#7c5cff; --ok:#34d399; --warn:#fbbf24; --err:#f87171;
+    --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#eef2fb; --bg2:#e3e9f7; --card:#ffffff; --card2:#f3f6ff; --line:#d5ddf2; --txt:#18213d; --mut:#5d6b94; --shadow:0 10px 26px rgba(40,60,120,.14); }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 "Segoe UI",system-ui,sans-serif;color:var(--txt);
+       background:radial-gradient(1200px 600px at 10% -10%,var(--bg2),transparent 60%),var(--bg);min-height:100vh}
+  .wrap{max-width:1040px;margin:0 auto;padding:28px 20px 90px}
+  header{display:flex;align-items:center;gap:16px;margin-bottom:26px}
+  .logo{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,var(--acc),var(--acc2));
+        display:grid;place-items:center;font-size:28px;box-shadow:var(--shadow)}
+  h1{font-size:26px;margin:0;letter-spacing:.2px}
+  .sub{color:var(--mut);margin-top:2px}
+  section{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:22px;margin-bottom:22px;box-shadow:var(--shadow)}
+  .sh{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .num{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;display:grid;place-items:center;font-weight:700}
+  h2{margin:0;font-size:19px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:var(--card2);color:var(--mut)}
+  .chip.ok{color:var(--ok);border-color:rgba(52,211,153,.4)} .chip.warn{color:var(--warn);border-color:rgba(251,191,36,.4)} .chip.err{color:var(--err);border-color:rgba(248,113,113,.4)}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:10px 18px;font-weight:650;color:#fff;
+         background:linear-gradient(135deg,var(--acc),var(--acc2));transition:transform .08s,filter .15s,opacity .15s}
+  button:hover{filter:brightness(1.1)} button:active{transform:scale(.97)} button:disabled{opacity:.5;cursor:default}
+  button.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+  .gt{margin:20px 0 10px;color:var(--mut);font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
+  .tile{display:flex;gap:14px;align-items:flex-start;padding:16px;border-radius:16px;background:var(--card2);border:1.5px solid var(--line);
+        cursor:pointer;transition:border-color .15s,transform .1s,opacity .15s;user-select:none;position:relative}
+  .tile:hover{transform:translateY(-2px)}
+  .tile.on{border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,140,255,.18)}
+  .tile.off{opacity:.62}
+  .tile.na{cursor:not-allowed}
+  .ic{font-size:30px;line-height:1}
+  .tt{font-weight:700;margin-bottom:2px} .ds{color:var(--mut);font-size:13.5px}
+  .tg{margin-left:auto;flex:none}
+  .sw{width:44px;height:26px;border-radius:999px;background:#475079;position:relative;transition:background .15s}
+  .sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
+  .tile.on .sw{background:var(--ok)} .tile.on .sw::after{left:21px}
+  .badge{position:absolute;top:10px;right:12px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+  .b-ok{background:rgba(52,211,153,.15);color:var(--ok)} .b-no{background:rgba(248,113,113,.15);color:var(--err)}
+  .tile .tg{margin-top:22px}
+  #log{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:13px/1.55 Consolas,monospace;color:var(--mut);max-height:160px;overflow:auto;margin-top:14px;white-space:pre-wrap}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:14px}
+  .kv div{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .kv b{display:block;color:var(--mut);font-size:12px;font-weight:600;margin-bottom:2px}
+  img.prev{width:100%;border-radius:14px;border:1px solid var(--line);margin-top:14px}
+  .bar{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(0deg,var(--bg) 60%,transparent);padding:18px 20px}
+  .bar .in{max-width:1040px;margin:0 auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .sp{flex:1}
+  .hint{color:var(--mut);font-size:13.5px}
+  .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ok);color:#06281b;padding:10px 18px;border-radius:12px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s}
+  .toast.show{opacity:1}
+  .spin{width:16px;height:16px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:r .8s linear infinite;display:none}
+  button.busy .spin{display:inline-block} @keyframes r{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">🌾</div>
+    <div><h1>Farm Helper · Configuração</h1><div class="sub">Escolha o que o bot deve fazer na sua land e calibre pela sua tela. Tudo fica salvo neste computador.</div></div>
+  </header>
+
+  <section id="s1">
+    <div class="sh"><div class="num">1</div><h2>Calibração da tela</h2><span id="calChip" class="chip">verificando…</span></div>
+    <div class="hint">O assistente lê o jogo aberto no seu navegador (tamanho da janela, zoom, câmera, tamanho da land e onde estão as construções) e salva uma única vez. Depois disso o bot só reaproveita o que foi salvo.</div>
+    <div class="row" style="margin-top:14px">
+      <button id="btnCal"><span class="spin"></span><span id="btnCalTxt">Calibrar agora</span></button>
+      <button id="btnBrowser" class="ghost">Abrir o navegador em modo depuração</button>
+      <span class="hint">Antes: deixe o jogo aberto e logado (carteira conectada) no navegador configurado.</span>
+    </div>
+    <div id="log" style="display:none"></div>
+    <div id="calInfo"></div>
+    <img id="prev" class="prev" style="display:none" alt="Conferência da calibração">
+  </section>
+
+  <section id="s2">
+    <div class="sh"><div class="num">2</div><h2>Construções e rotinas</h2></div>
+    <div class="hint">Desmarque o que você não tem ou não quer que o bot faça: a rotina desmarcada é pulada por completo.</div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="allOn">Marcar tudo</button>
+      <button class="ghost" id="foundOnly">Só o que foi encontrado na land</button>
+    </div>
+    <div id="groups"></div>
+  </section>
+</div>
+
+<div class="bar"><div class="in">
+  <span class="hint" id="saveHint">Alterações ainda não salvas.</span><div class="sp"></div>
+  <button id="btnSave">Salvar configuração</button>
+  <button id="btnDone" class="ghost">Concluir e fechar</button>
+</div></div>
+<div class="toast" id="toast">Salvo!</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let cfg = null, mods = {}, dirty = false;
+
+async function api(path, body){
+  const r = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)} : {});
+  return r.json();
+}
+function toast(t){ const e=$('#toast'); e.textContent=t; e.classList.add('show'); setTimeout(()=>e.classList.remove('show'),1800); }
+function setDirty(v){ dirty=v; $('#saveHint').textContent = v ? 'Alterações ainda não salvas.' : 'Tudo salvo.'; }
+
+function render(){
+  const found = cfg.found || {}, haveCal = !!cfg.calibration;
+  const groups = {};
+  cfg.catalog.forEach(c => (groups[c.group] = groups[c.group] || []).push(c));
+  const host = $('#groups'); host.innerHTML = '';
+  Object.entries(groups).forEach(([g, items]) => {
+    const t = document.createElement('div'); t.className='gt'; t.textContent=g; host.appendChild(t);
+    const grid = document.createElement('div'); grid.className='grid'; host.appendChild(grid);
+    items.forEach(c => {
+      const na = c.auto === false;
+      const on = !!mods[c.key] && !na;
+      const el = document.createElement('div');
+      el.className = 'tile ' + (on ? 'on' : 'off') + (na ? ' na' : '');
+      let badge = '';
+      if (na) badge = '<span class="badge b-no">manual</span>';
+      else if (haveCal) badge = found[c.key] ? '<span class="badge b-ok">encontrada</span>' : '<span class="badge b-no">não achei na land</span>';
+      el.innerHTML = `<div class="ic">${c.icon}</div><div><div class="tt">${c.label}</div><div class="ds">${c.desc}</div></div>
+                      <div class="tg"><div class="sw"></div></div>${badge}`;
+      if (!na) el.onclick = () => { mods[c.key] = !mods[c.key]; setDirty(true); render(); };
+      grid.appendChild(el);
+    });
+  });
+  // calibração
+  const chip = $('#calChip');
+  if (haveCal){
+    chip.className='chip ok'; chip.textContent='calibrado ✓';
+    const s = cfg.calibration.system || {}, w = s.janela_navegador || {}, t = s.tela || {};
+    $('#calInfo').innerHTML = `<div class="kv">
+      <div><b>Land</b>${cfg.calibration.grid_size}×${cfg.calibration.grid_size} tiles</div>
+      <div><b>Tamanho do tile</b>${(cfg.calibration.hw*2).toFixed(0)} px de largura</div>
+      <div><b>Janela do navegador</b>${w.width||'?'}×${w.height||'?'}</div>
+      <div><b>Tela / escala</b>${t.w||'?'}×${t.h||'?'} · ${t.dpr||1}x</div>
+      <div><b>Calibrado em</b>${(cfg.calibration.created||'').replace('T',' ')}</div></div>`;
+    if (cfg.calibration.has_preview){ const p=$('#prev'); p.style.display='block'; p.src='/preview.png?'+Date.now(); }
+  } else { chip.className='chip warn'; chip.textContent='ainda não calibrado'; $('#calInfo').innerHTML=''; }
+}
+
+async function load(){
+  cfg = await api('/api/config'); mods = Object.assign({}, cfg.modules);
+  setDirty(!cfg.has_user_config); render();
+}
+$('#allOn').onclick = () => { cfg.catalog.forEach(c => { if(c.auto!==false) mods[c.key]=true; }); setDirty(true); render(); };
+$('#foundOnly').onclick = () => {
+  if(!cfg.calibration){ toast('Calibre primeiro para eu saber o que existe.'); return; }
+  cfg.catalog.forEach(c => { if(c.auto!==false) mods[c.key]=!!cfg.found[c.key]; }); setDirty(true); render();
+};
+$('#btnSave').onclick = async () => { await api('/api/config', {modules:mods}); setDirty(false); toast('Configuração salva!'); };
+$('#btnDone').onclick = async () => {
+  if(dirty) await api('/api/config', {modules:mods});
+  await api('/api/close', {}); document.body.innerHTML='<div style="display:grid;place-items:center;height:100vh;font:20px Segoe UI;color:#9aa6cf">Pronto! Pode fechar esta aba e iniciar o bot.</div>';
+};
+$('#btnBrowser').onclick = async () => {
+  const restart = confirm('Se o navegador já estiver aberto SEM depuração, ele será fechado e reaberto (as abas voltam). Continuar?');
+  if(!restart) return;
+  await api('/api/open_browser', {restart:true}); toast('Abrindo o navegador… aguarde ~20 s e clique em Calibrar.');
+};
+let poll = null;
+$('#btnCal').onclick = async () => {
+  const b = $('#btnCal'); b.disabled = true; b.classList.add('busy'); $('#btnCalTxt').textContent='Calibrando…';
+  const L = $('#log'); L.style.display='block'; L.textContent='';
+  await api('/api/calibrate', {});
+  poll = setInterval(async () => {
+    const s = await api('/api/status');
+    L.textContent = s.log.map(x=>'• '+x).join('\n') + (s.error ? '\n✗ '+s.error : '');
+    L.scrollTop = L.scrollHeight;
+    if(!s.calibrating){
+      clearInterval(poll); b.disabled=false; b.classList.remove('busy'); $('#btnCalTxt').textContent='Calibrar de novo';
+      if(s.result){ toast('Calibração salva!'); await load();
+        // pré-seleciona só o que existe, se ainda não havia configuração salva
+        if(!cfg.has_user_config){ cfg.catalog.forEach(c => { if(c.auto!==false) mods[c.key]=!!cfg.found[c.key]; }); setDirty(true); render(); } }
+    }
+  }, 900);
+};
+load();
+</script>
+</body>
+</html>
