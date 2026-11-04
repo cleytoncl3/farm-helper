@@ -162,10 +162,41 @@ def enter_game(page, link: Link) -> None:
         return
     except TimeoutError:
         pass
+    _wait_login(page)
     s = config.VIEWPORT["width"] / config.REF_WIDTH
     log.info("[BOT] Tela inicial detectada; clicando em PLAY")
     page.mouse.click(config.UI["play"][0] * s, config.UI["play"][1] * s)
-    link.refresh(timeout=120)
+    try:
+        link.refresh(timeout=60)
+    except TimeoutError:
+        _wait_login(page)                      # o PLAY pode ter aberto o pedido de login
+        link.refresh(timeout=120)
+
+
+def needs_login(page) -> bool:
+    """O jogo está pedindo para entrar (tela 'SIGN IN / Pick how you want to play')? Lê o texto da página; nada é digitado."""
+    try:
+        return "Pick how you want to play" in page.evaluate("() => document.body ? document.body.innerText : ''")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _wait_login(page, limit: float = 900.0) -> None:
+    """Se o jogo pede login, ESPERA você entrar com a sua carteira (o bot não faz login) em vez de falhar e reiniciar em ciclo."""
+    if not needs_login(page):
+        return
+    log.warning("[LOGIN] O jogo está pedindo login. Entre com a sua carteira (Ronin) na janela do navegador; o bot continua sozinho depois. "
+                "(Esperando até %d min; para parar, clique em Parar.)", limit // 60)
+    end = time.time() + limit
+    while time.time() < end:
+        if STOP_FILE.exists():
+            raise StopRequested()
+        time.sleep(4)
+        if not needs_login(page):
+            log.info("[LOGIN] Login feito; continuando")
+            time.sleep(3)
+            return
+    raise TimeoutError("o jogo continua pedindo login; entre na sua conta e inicie o bot de novo")
 
 
 class Game:
@@ -189,6 +220,9 @@ class Game:
         self.craft_next: dict[str, float] = {}           # quando revisitar moinho/laticínio/padaria
         self.disabled: set[str] = set()                  # rotinas desligadas pelo usuário (config_usuario.json)
         self.bias: dict | None = None                    # correção da grade medida nos tiles (tileprobe)
+        self.dialog_close_fn = None                      # como fechar a janela de casa aberta agora (usado antes de comprar energia)
+        self.dialog_gone = False                         # a janela foi fechada pela compra de energia: a rotina deve parar
+        self.trusted = None                              # calibração conferida pelos tiles (não muda com a cor do céu/hora do dia)
         self.land_g: int | None = None                   # tamanho da land (tiles por lado) lido na tela
         self.avail_crops: set[str] | None = None         # sementes que o nível do jogador libera (catálogo + nível)
         self.bad_crops: dict[str, float] = {}            # semente -> até quando ignorar (não achada na loja)
@@ -346,6 +380,10 @@ class Game:
             self.tool = None
             raise RuntimeError("calibração indisponível: a ilha não aparece (janela aberta por cima?)")
         changed = c is not self.calib
+        t = self.trusted
+        if changed and t is not None and (abs(c.xv - t.xv) > 2 or abs(c.yv - t.yv) > 2 or abs(c.hw - t.hw) > 0.5):
+            c = self._keep_trusted(c, t)                  # o ajuste pela borda varia com a cor do céu (dia/entardecer/noite)
+            changed = c is not self.calib
         self.calib, self.grid = c, c.grid
         h = self.page.viewport_size["height"] if self.page.viewport_size else config.VIEWPORT["height"]
         if c.yv > autocal.SAFE_YV * h:
@@ -354,6 +392,33 @@ class Game:
             self.frame_camera()                  # levanta erro se não conseguir
             changed = True
         return changed
+
+    def _keep_trusted(self, new, trusted):
+        """A leitura nova da borda difere da calibração conferida pelos tiles: pode ser a câmera que mexeu OU só a cor do céu
+        (entardecer/noite deslocam o ajuste da borda em ~15 px). Tira a dúvida com o destaque do mouse (não depende de cor)."""
+        import tileprobe
+
+        try:
+            objs = self.link.objects()
+            g = self._grid_size()
+            w, h = self.page.viewport_size["width"], self.page.viewport_size["height"]
+            free = [t for t in tileprobe.free_tiles(g, objs) if 2 <= t[0] <= g - 3 and 2 <= t[1] <= g - 3
+                    and tileprobe._in_view(*trusted.grid.p(*t), w, h)]
+            if not free:
+                return new
+            cx, cy = trusted.grid.p(g // 2, g // 2)
+            t = min(free, key=lambda q: (trusted.grid.p(*q)[0] - cx) ** 2 + (trusted.grid.p(*q)[1] - cy) ** 2)
+            px, py = trusted.grid.p(*t)
+            self.hand()
+            pr = tileprobe.Prober(self.page).probe(px, py, trusted.hw, trusted.grid.hh)
+            if pr is not None and abs(pr[0] - px) <= 5 and abs(pr[1] - py) <= 5:
+                log.info("[CALIB] a leitura pela borda mudou (vértice y %.0f -> %.0f), mas a câmera não: o tile %d,%d está onde a calibração "
+                         "conferida diz; mantendo a calibração conferida", trusted.yv, new.yv, *t)
+                return trusted
+        except Exception as e:  # noqa: BLE001
+            log.warning("[CALIB] não consegui conferir pelos tiles (%s); usando a leitura nova", e)
+        self.trusted = None                               # a câmera mexeu de verdade: a leitura nova vale
+        return new
 
     def frame_camera(self, measure: bool | None = None) -> None:
         """Enquadra a land (zoom + tile central no centro da tela) e calibra. Com `measure` (padrão: se ainda não há
@@ -396,6 +461,7 @@ class Game:
         self.bias = res.get("bias")
         self.calib = autocal.calibrate_array(autocal.grab(self.page), self.land_g, self.bias)
         self.grid = self.calib.grid
+        self.trusted = self.calib if self.bias else None
         if self.bias:
             log.info("[CALIB] land %dx%d lida pelos tiles; grade exata: tile %.2f×%.2f px, correção da borda (%+.1f, %+.1f) px, erro médio %.1f px (%d tiles medidos)",
                      self.land_g, self.land_g, res["hw"], res["hh"], res["dxpx"], res["dypx"], res["rms"], res["n"])
@@ -458,13 +524,16 @@ class Game:
         saved = autocal.Calib(Grid.from_dict(k["grid"]), k["xv"], k["yv"], k["m"], k["hw"], k["frac"], self.bias)
         if autocal.still_valid(autocal.grab(self.page), saved):
             self.calib, self.grid = saved, saved.grid
+            self.trusted = saved if self.bias else None
             log.info("[CALIB] usando a calibração salva (land %dx%d)", self._grid_size(), self._grid_size())
             return True
         had_bias = self.bias is not None
         self.frame_camera()                       # câmera diferente (jogo reiniciou/arrastou): reenquadra (e mede, se faltar a medida)
         c = self.calib
-        if had_bias and abs(c.xv - saved.xv) < 8 and abs(c.yv - saved.yv) < 8 and abs(c.hw - saved.hw) < 1.2:
+        if had_bias and abs(c.hw - saved.hw) < 1.2 and (
+                (abs(c.xv - saved.xv) < 8 and abs(c.yv - saved.yv) < 8) or self._keep_trusted(c, saved) is saved):
             self.calib, self.grid = saved, saved.grid
+            self.trusted = saved
             log.info("[CALIB] câmera reenquadrada; calibração salva mantida")
         else:
             log.info("[CALIB] câmera reenquadrada (posição diferente da salva; usando a leitura atual da tela)")
@@ -597,16 +666,28 @@ class Game:
         if e0 > config.ENERGY_BUY_AT:                     # trava final: nunca compra acima do limite
             raise EnergyWait(f"energia {e0:.0f} > {config.ENERGY_BUY_AT}: compra cancelada")
         log.info("[ENERGIA] energia %.0f (acabou); comprando pacote BEST VALUE (token de testnet)", e0)
-        self.close_dialogs()                              # saco de sementes preso ao cursor ou janela aberta engolem o clique no "+"
-        self.escape()
-        self.tool = None
-        self.click_ui("energy_plus")
-        self.click_ui("energy_best_buy")
-        self.pause(1.5, 2.5)
-        self.click_ui("energy_close")
-        self.tool = None
-        self.escape()
-        e1 = self._fresh_energy()
+        if self.dialog_close_fn is not None:              # janela de casa aberta (ex.: fábrica): fecha ANTES, senão o "+" cai nela
+            try:
+                self.dialog_close_fn()
+            finally:
+                self.dialog_close_fn = None
+                self.dialog_gone = True
+        e1 = e0
+        for attempt in range(2):                          # o diálogo demora a abrir: 1 repetição se a energia não subiu (a leitura é a real)
+            self.close_dialogs()                          # saco de sementes preso ao cursor ou janela aberta engolem o clique no "+"
+            self.escape()
+            self.tool = None
+            self.click_ui("energy_plus")
+            self.pause(1.6, 2.0)                          # espera o diálogo "Buy energy" terminar de abrir
+            self.click_ui("energy_best_buy")
+            self.pause(2.0, 3.0)
+            self.click_ui("energy_close")
+            self.tool = None
+            self.escape()
+            e1 = self._fresh_energy()
+            if self.dry or e1 >= e0 + 20:
+                break
+            log.warning("[ENERGIA] a energia não subiu (%.0f -> %.0f); %s", e0, e1, "tentando de novo" if attempt == 0 else "desisto")
         if not self.dry and e1 < e0 + 20:
             raise RuntimeError(f"a compra de energia não aumentou a energia ({e0:.0f} -> {e1:.0f}); confira o saldo de tokens e o botão")
         log.info("[ENERGIA] energia %.0f -> %.0f", e0, e1)

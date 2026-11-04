@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import Counter
+from pathlib import Path
 
 import config
 import shopscan
@@ -72,11 +73,18 @@ def feed_factory(g: Game) -> None:
     g.pause(1.0, 1.5)
     info = g.link.wait_api("/api/factory/state", t0, 6.0)     # receitas + estoque (have/need) do próprio jogo
     g.click_ui("factory_collect_all")
-    if info and info.get("j"):
-        _factory_plan(g, info["j"])
-    elif not g.dry:
-        log.warning("[FÁBRICA] não recebi os dados da fábrica (o diálogo abriu?)")
-    g.click_ui("factory_close")
+    g.dialog_gone = False
+    g.dialog_close_fn = lambda: g.click_ui("factory_close")      # se precisar comprar energia, fecha a fábrica antes
+    try:
+        if info and info.get("j"):
+            _factory_plan(g, info["j"])
+        elif not g.dry:
+            log.warning("[FÁBRICA] não recebi os dados da fábrica (o diálogo abriu?)")
+    finally:
+        g.dialog_close_fn = None
+    if not g.dialog_gone:
+        g.click_ui("factory_close")
+    g.dialog_gone = False
 
 
 def _factory_plan(g: Game, data: dict) -> None:
@@ -114,6 +122,8 @@ def _factory_plan(g: Game, data: dict) -> None:
         if units >= 1 and free > 0 and room >= 1:
             units = min(units, room, max_per, config.FACTORY_MAX_PER_FOOD)
             units = g.affordable(int(data.get("craft_energy", 3)), units)      # só o que a energia paga (compra só com <= 6)
+            if g.dialog_gone:                                  # a compra fechou a fábrica: reabre no próximo ciclo
+                return
             if units < 1:
                 log.info("[ENERGIA] sem energia para fabricar %s agora; volto no próximo ciclo", name)
                 continue
@@ -499,13 +509,30 @@ def _buy_and_place(g: Game, crop: str, n: int) -> list[tuple[float, float]]:
     g.tool = None                                        # mostra o destaque do tile e o teste de "tile livre" reprova todos)
     g.hand()
     drop = None
-    for cand in _sack_candidates(g, near):               # 1) tile livre confirmado ANTES de abrir a loja
-        if _tile_is_free(g, cand):
-            drop = cand
+    cands = _sack_candidates(g, near)
+    for rnd in range(2):                                 # 1) tile livre confirmado ANTES de abrir a loja
+        for cand in (cands[:5] if rnd == 0 else cands[:8]):
+            if _tile_is_free(g, cand):
+                drop = cand
+                break
+            log.info("[SACO] o tile (%d,%d) não aceita o saco (ocupado ou fora da land); tentando outro", *cand)
+        if drop is not None:
             break
-        log.info("[SACO] o tile (%d,%d) não aceita o saco (ocupado ou fora da land); tentando outro", *cand)
+        if rnd == 0:                                     # nenhum aceitou: algo está por cima do jogo (menu, saco, janela); limpa e repete
+            log.warning("[SACO] nenhum tile confirmado; fechando janelas/menus e tentando de novo")
+            g.close_dialogs()
+            g.recover()
     if drop is None:
-        raise RuntimeError("não achei um tile livre (confirmado na tela) para soltar o saco de sementes")
+        # o teste na tela é só uma garantia a mais: o saco só é usado depois de CONFIRMADO no estado do jogo (_wait_sack),
+        # então segue com o 1º tile livre segundo o estado, guardando uma foto para diagnóstico
+        drop = cands[0] if cands else None
+        if drop is None:
+            raise RuntimeError("não achei um tile livre para soltar o saco de sementes")
+        log.warning("[SACO] sem confirmação na tela; usando o tile %d,%d (livre pelo estado do jogo) e conferindo o saco depois", *drop)
+        try:
+            g.page.screenshot(path=str(Path(__file__).resolve().parent / "falha_saco.png"))
+        except Exception:  # noqa: BLE001
+            pass
     log.info("[PLANTIO] comprando %d sementes de %s (saco no tile %d,%d)", n, crop, *drop)
     g.click_ui("shop_button")
     g.pause(1.0, 1.5)

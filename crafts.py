@@ -14,7 +14,7 @@ import logging
 import time
 
 import config
-from game import Game
+from game import EnergyWait, Game
 from tasks import _qty_inv
 
 log = logging.getLogger("fh")
@@ -68,11 +68,28 @@ def _reread(g: Game, api_path: str, click_xy, note: str):
     return r["j"] if r and r["t"] > t0 and isinstance(r.get("j"), dict) else None
 
 
+def _energy(g: Game, typ: str, need: float) -> None:
+    """Energia para a próxima receita. Se precisa COMPRAR, fecha antes a janela da casa (com ela aberta o clique no '+' da energia cai na janela e a compra falha),
+    compra e cancela esta rodada (a casa reabre em seguida). Só compra com energia <= 6 (regra do ensure_energy)."""
+    g.link.snapshot()
+    if g.energy() >= need:
+        return
+    _close(g, typ)
+    g.dialog_closed = typ
+    g.craft_next[typ] = time.time() + 90                # sem compra (energia > 6): espera a recarga natural antes de reabrir
+    g.ensure_energy(need)                               # compra (ou levanta EnergyWait se a energia está acima de 6)
+    g.craft_next[typ] = time.time() + 8                 # comprou: reabre logo
+    raise EnergyWait("energia comprada; a casa reabre em seguida")
+
+
 CLOSE_X = {"windmill": (1363, 58), "dairy": (1376, 66), "bakery": (1374, 70)}
 
 
 def _close(g: Game, typ: str = "") -> None:
     """Fecha a janela da casa: primeiro no X conhecido dela, depois confere (e fecha) qualquer janela que sobrou."""
+    if getattr(g, "dialog_closed", None) == typ:       # já foi fechada (compra de energia): não clica no X às cegas
+        g.dialog_closed = None
+        return
     if typ in CLOSE_X and not g.dry:
         _click(g, CLOSE_X[typ], f"fechar {typ}")
     g.close_dialogs()
@@ -113,7 +130,7 @@ def windmill(g: Game) -> None:
                     continue
             elif crop_qty - int(r["input_qty"]) < FLOUR_RESERVE or flour >= FLOUR_TARGET:
                 continue
-            g.ensure_energy(energy)
+            _energy(g, "windmill", energy)
             _click(g, (WINDMILL["recipe_x"], WINDMILL["recipe_y0"] + WINDMILL["recipe_dy"] * i), f"moinho: {r['key']}")
             _click(g, WINDMILL["grind"], "moinho: moer")
             g.spend(energy)
@@ -160,7 +177,7 @@ def dairy(g: Game) -> None:
                 break
             want[recipes[pick]["key"]] = want.get(recipes[pick]["key"], 0) - 1
             r = recipes[pick]
-            g.ensure_energy(energy)
+            _energy(g, "dairy", energy)
             _click(g, (DAIRY["recipe_x"], DAIRY["recipe_y0"] + DAIRY["recipe_dy"] * pick), f"laticínio: {r['key']}")
             _click(g, DAIRY["make"], "laticínio: fazer")
             g.spend(energy)
@@ -219,7 +236,7 @@ def bakery(g: Game) -> None:
             _, _, i = max(cands)
             want[recipes[i]["key"]] = want.get(recipes[i]["key"], 0) - 1
             r = recipes[i]
-            g.ensure_energy(energy)
+            _energy(g, "bakery", energy)
             _click(g, (BAKERY["col_x0"] + BAKERY["col_dx"] * (i % 3), BAKERY["row_y0"] + BAKERY["row_dy"] * (i // 3)), f"padaria: {r['key']}")
             _click(g, BAKERY["bake"], "padaria: assar")
             g.spend(energy)

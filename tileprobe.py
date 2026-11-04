@@ -22,6 +22,16 @@ def _white(arr: np.ndarray) -> np.ndarray:
     return (arr[..., 0] >= 244) & (arr[..., 1] >= 244) & (arr[..., 2] >= 244)
 
 
+def _new_white(hov: np.ndarray, *bases: np.ndarray) -> np.ndarray:
+    """Pixels que ficaram CLAROS com o mouse em cima (o destaque do jogo) comparando com a mesma região sem o mouse.
+    Relativo, não absoluto: no entardecer/noite o jogo escurece e tinge a tela e o 'branco' do destaque deixa de passar de 244."""
+    mh = hov.min(axis=2).astype(np.int16)
+    out = mh >= 150
+    for b in bases:
+        out &= (mh - b.min(axis=2).astype(np.int16)) >= 40
+    return out
+
+
 def free_tiles(g: int, objs: list[dict], margin: int = 1) -> set[tuple[int, int]]:
     """Tiles da land sem prédio/planta/árvore/animal (e com folga): só neles o jogo mostra o destaque do mouse."""
     occ: set[tuple[int, int]] = set()
@@ -130,7 +140,7 @@ class Prober:
         b2 = self._shot()
         x0, x1 = int(max(0, x - 2.0 * hw)), int(min(w, x + 2.0 * hw))
         y0, y1 = int(max(0, y - 3.0 * hh)), int(min(h, y + 3.0 * hh))
-        new = _white(hov[y0:y1, x0:x1]) & ~_white(b1[y0:y1, x0:x1]) & ~_white(b2[y0:y1, x0:x1])
+        new = _new_white(hov[y0:y1, x0:x1], b1[y0:y1, x0:x1], b2[y0:y1, x0:x1])
         ys, xs = np.nonzero(new)
         if len(xs) == 0:
             return False
@@ -152,7 +162,7 @@ class Prober:
         base = self._shot()
         x0, x1 = int(max(0, x - 2.2 * hw)), int(min(w, x + 2.2 * hw))
         y0, y1 = int(max(0, y - 3.2 * hh)), int(min(h, y + 3.2 * hh))
-        new = _white(hov[y0:y1, x0:x1]) & ~_white(base[y0:y1, x0:x1])
+        new = _new_white(hov[y0:y1, x0:x1], base[y0:y1, x0:x1])
         ys, xs = np.nonzero(new)
         if len(xs) < 10:
             return None
