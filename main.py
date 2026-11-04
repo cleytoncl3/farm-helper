@@ -16,7 +16,7 @@ import crafts
 import orders
 import tasks
 import userconfig
-from game import Game, StopRequested, banner, enter_game, load_grid, open_game, setup_logging
+from game import EnergyWait, Game, StopRequested, banner, enter_game, load_grid, open_game, setup_logging
 from gamestate import Link
 
 log = logging.getLogger("fh")
@@ -36,6 +36,13 @@ def safe(g: Game, name: str, fn, fails: dict) -> bool:
         return True
     except (StopRequested, KeyboardInterrupt):
         raise
+    except EnergyWait as e:                            # sem energia e sem permissão de comprar: não é erro; tenta no próximo ciclo
+        log.info("[ENERGIA] %s: %s", name, e)
+        try:
+            g.recover()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
     except PlaywrightError as e:
         fails[name] = fails.get(name, 0) + 1
         log.error("[ERRO] %s: falha no navegador (%s); recuperando", name, e.message.splitlines()[0])

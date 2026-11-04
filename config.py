@@ -76,6 +76,7 @@ UI = {
     "shop_qty": (1200, 502),
     "shop_buy": (1200, 602),
     "shop_close": (1340, 48),
+    "shop_tab_seeds": (326, 186),    # aba SEEDS da loja (o jogo lembra a última aba aberta)
     "energy_plus": (1193, 38),
     "energy_best_buy": (958, 450),   # pacote BEST VALUE (+150 por 20 token de testnet)
     "energy_close": (1057, 153),
@@ -115,8 +116,9 @@ ENERGY_PLANT = 1
 ENERGY_WATER_TILE = 2          # rega 1 por 1 (ferramenta Water, área 1 tile)
 ENERGY_TREE = 2
 ENERGY_FEED = 2
-ENERGY_MAX = 170
-ENERGY_RESERVE = 15
+ENERGY_MAX = 100000                 # sem teto prático: a barra real depende do nível (ex.: 205)
+ENERGY_RESERVE = 0
+ENERGY_BUY_AT = 6               # só compra energia com 6 ou MENOS (e insuficiente para a ação); acima disso NUNCA compra
 
 # Intervalos (segundos) entre tentativas das tarefas sem estado legível
 INTERVAL_FACTORY = 120

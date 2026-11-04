@@ -31,6 +31,10 @@ class StopRequested(Exception):
     pass
 
 
+class EnergyWait(Exception):
+    """Sem energia para a ação e SEM direito de comprar (energia acima do limite): a tarefa para e volta no próximo ciclo."""
+
+
 NOMES_ANIMAIS = {"cow": "vaca", "chickencoop": "galinheiro", "pig": "porco"}
 _CORES = {"FÁBRICA": "35", "INVENTÁRIO": "34", "ANIMAL": "33", "MINA": "36", "MEL": "93", "ÁRVORES": "32", "COLHEITA": "92",
           "PLANTIO": "32", "REGA": "94", "PLANO": "95", "ENERGIA": "93", "INTERRUPÇÃO": "1;35", "STATUS": "90", "BOT": "1;37",
@@ -186,6 +190,9 @@ class Game:
         self.disabled: set[str] = set()                  # rotinas desligadas pelo usuário (config_usuario.json)
         self.bias: dict | None = None                    # correção da grade medida nos tiles (tileprobe)
         self.land_g: int | None = None                   # tamanho da land (tiles por lado) lido na tela
+        self.avail_crops: set[str] | None = None         # sementes que o nível do jogador libera (catálogo + nível)
+        self.bad_crops: dict[str, float] = {}            # semente -> até quando ignorar (não achada na loja)
+        self.buy_fail: dict[str, int] = {}
         self.demand: dict[str, int] = {}                 # item -> quanto falta produzir p/ missões e pedidos (orders.py)
         self.honey_next = 0.0                            # quando as colmeias devem ser visitadas de novo
         self.request_factory = False                     # colheita de ingrediente: reconsultar fábrica/inventário já
@@ -545,27 +552,55 @@ class Game:
     def spend(self, n: float) -> None:
         self.events.append((time.time(), -n))
 
-    def ensure_energy(self, need: float) -> None:
-        self.link.snapshot()
-        while self.energy() < need + config.ENERGY_RESERVE:
-            if not self.auto_energy:
-                log.info("[ENERGIA] %.0f < %.0f; aguardando recarga natural (60 s)", self.energy(), need)
-                for _ in range(6):
-                    self.pause(9.5, 10.5)
-                self.link.snapshot()
-                continue
-            self.buy_energy()
+    def _fresh_energy(self) -> float:
+        """Energia REAL: espera o próximo salvamento do jogo (a estimativa ignora a recarga natural e erra para baixo)."""
+        if self.dry:
+            return self.energy()
+        try:
+            self.link.refresh(timeout=30)
+        except Exception:  # noqa: BLE001
             self.link.snapshot()
+        return self.energy()
+
+    def ensure_energy(self, need: float) -> None:
+        """Garante energia para a próxima ação (o custo real dela). COMPRA SÓ quando a energia REAL é <= ENERGY_BUY_AT (6) e
+        não paga a ação; acima disso NUNCA compra: levanta EnergyWait (a tarefa para sem gastar nada e volta no próximo ciclo)."""
+        self.link.snapshot()
+        if self.energy() >= need:
+            return
+        e = self._fresh_energy()                          # confirma com a leitura real antes de decidir
+        if e >= need:
+            return
+        if e > config.ENERGY_BUY_AT or not self.auto_energy:
+            raise EnergyWait(f"energia {e:.0f} < {need:.0f} para a ação; não compro (só compro com {config.ENERGY_BUY_AT} ou menos); "
+                             "espero a recarga natural")
+        self.buy_energy()
+
+    def affordable(self, per_unit: float, want: int) -> int:
+        """Quantas unidades (de `per_unit` de energia cada) dá para pagar AGORA, até `want`. Compra só se a energia real <= 6."""
+        if self.energy() < per_unit:
+            try:
+                self.ensure_energy(per_unit)
+            except EnergyWait:
+                return 0
+        return max(0, min(want, int(self.energy() // max(per_unit, 1))))
 
     def buy_energy(self) -> None:
-        log.info("[ENERGIA] Comprando pacote BEST VALUE (token de testnet)")
+        e0 = self._fresh_energy()
+        if e0 > config.ENERGY_BUY_AT:                     # trava final: nunca compra acima do limite
+            raise EnergyWait(f"energia {e0:.0f} > {config.ENERGY_BUY_AT}: compra cancelada")
+        log.info("[ENERGIA] energia %.0f (acabou); comprando pacote BEST VALUE (token de testnet)", e0)
         self.click_ui("energy_plus")
         self.click_ui("energy_best_buy")
         self.pause(1.5, 2.5)
         self.click_ui("energy_close")
-        self.events.append((time.time(), config.ENERGY_MAX))   # estimativa: enche a barra
         self.tool = None
         self.escape()
+        e1 = self._fresh_energy()
+        if not self.dry and e1 < e0 + 20:
+            raise RuntimeError(f"a compra de energia não aumentou a energia ({e0:.0f} -> {e1:.0f}); confira o saldo de tokens e o botão")
+        log.info("[ENERGIA] energia %.0f -> %.0f", e0, e1)
+
 
     # ---------------------------------------------------------------- recuperação
     def restart_session(self) -> None:

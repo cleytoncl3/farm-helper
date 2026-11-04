@@ -113,6 +113,31 @@ class Prober:
     def _shot(self) -> np.ndarray:
         return autocal.grab(self.page)
 
+    def present(self, x: float, y: float, hw: float = 26.0, hh: float = 11.0, min_px: int = 14) -> bool:
+        """O destaque do mouse aparece neste tile? Conta pixels brancos NOVOS num anel em volta do centro previsto (onde ficam
+        os 4 tracinhos). Aguenta personagens passando por cima ou o ponteiro tapando parte do desenho (o `probe` exige a forma inteira)."""
+        w, h = self.page.viewport_size["width"], self.page.viewport_size["height"]
+        if not (5 <= x < w - 5 and 5 <= y < h - 5):
+            return False
+        self.n += 1
+        self.page.mouse.move(x, y, steps=3)
+        time.sleep(0.32)
+        hov = self._shot()
+        self.page.mouse.move(*self.park, steps=3)
+        time.sleep(0.32)
+        b1 = self._shot()
+        time.sleep(0.12)
+        b2 = self._shot()
+        x0, x1 = int(max(0, x - 2.0 * hw)), int(min(w, x + 2.0 * hw))
+        y0, y1 = int(max(0, y - 3.0 * hh)), int(min(h, y + 3.0 * hh))
+        new = _white(hov[y0:y1, x0:x1]) & ~_white(b1[y0:y1, x0:x1]) & ~_white(b2[y0:y1, x0:x1])
+        ys, xs = np.nonzero(new)
+        if len(xs) == 0:
+            return False
+        dx, dy = (xs + x0 - x) / (0.85 * hw), (ys + y0 - y) / (0.85 * hh)
+        ring = np.abs(np.sqrt(dx * dx + dy * dy) - 1.0) < 0.45
+        return int(ring.sum()) >= min_px
+
     def probe(self, x: float, y: float, hw: float = 26.0, hh: float = 11.0) -> tuple[float, float] | None:
         """Centro (px) do tile sob (x, y), ou None se não há tile destacado ali (fora da land / sem destaque)."""
         w, h = self.page.viewport_size["width"], self.page.viewport_size["height"]

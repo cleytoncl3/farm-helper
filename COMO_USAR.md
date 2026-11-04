@@ -142,3 +142,14 @@ Atencao: entregar da ouro/XP (e uma venda por encomenda); desligue as duas chave
    borda da ilha (cerca/penhasco). O resultado fica salvo em calibracao.json.
 A imagem calibracao_preview.png mostra o contorno da land reconhecida (branco), o tile central (magenta), as construcoes
 (circulos vermelhos) e a terra de plantio (pontos azuis). Depois de uma expansao o bot percebe o novo tamanho e recalibra.
+
+## 12. Energia e sementes (qualquer jogador, qualquer nivel)
+
+- Energia: o bot SO compra o pacote de energia quando a energia REAL (lida do jogo, nao estimada) e 6 ou menos E nao paga a
+  proxima acao. Com mais de 6 ele nunca compra: se a energia nao paga a acao, a tarefa para sem gastar nada e tenta no proximo
+  ciclo (recarga natural). Depois de comprar, confere que a energia subiu; se nao subiu (sem tokens), avisa e para de tentar.
+- Sementes: o bot le a loja pela tela e acha cada semente pelo desenho do icone, onde ela estiver (nao usa posicao fixa) e
+  usa o nivel do jogador (catalogo do jogo) para saber quais sementes estao liberadas. Semente que nao existe na sua loja e
+  ignorada por 1 h e o plantio usa outra cultura. Nada e comprado sem achar a semente.
+- Saco de sementes: antes de comprar, o bot confere NA TELA que o tile onde vai soltar o saco existe e esta livre (o jogo desenha
+  tracinhos brancos so em tiles livres sob o mouse); depois de comprar, confere que o saco apareceu na grama antes de plantar.

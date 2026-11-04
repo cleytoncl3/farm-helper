@@ -11,6 +11,8 @@ import time
 from collections import Counter
 
 import config
+import shopscan
+import tileprobe
 from game import NOMES_ANIMAIS, Game
 from geometry import bbox, components
 
@@ -62,7 +64,7 @@ def feed_factory(g: Game) -> None:
     if not fac:
         return
     g.hand()
-    g.ensure_energy(3 * config.FACTORY_MAX_PER_FOOD * 3)
+    g.ensure_energy(3)
     read_inventory(g)
     log.debug("[FÁBRICA] abrindo para coletar, fabricar e checar ingredientes")
     t0 = time.time() * 1000
@@ -111,7 +113,10 @@ def _factory_plan(g: Game, data: dict) -> None:
         room = config.FACTORY_MAX_PER_FOOD - queued.get(r.get("slug", ""), 0)     # nunca mais que o limite por ração
         if units >= 1 and free > 0 and room >= 1:
             units = min(units, room, max_per, config.FACTORY_MAX_PER_FOOD)
-            g.ensure_energy(int(data.get("craft_energy", 3)) * units)
+            units = g.affordable(int(data.get("craft_energy", 3)), units)      # só o que a energia paga (compra só com <= 6)
+            if units < 1:
+                log.info("[ENERGIA] sem energia para fabricar %s agora; volto no próximo ciclo", name)
+                continue
             g.click((config.UI["factory_recipe_x"] * g.ui_scale,
                      (config.UI["factory_recipe_y0"] + config.UI["factory_recipe_dy"] * i) * g.ui_scale),
                     note=f"receita {name}", ui=True)
@@ -403,23 +408,132 @@ def _sack_points(g: Game, x: int, y: int) -> list[tuple[float, float]]:
     return [g.grid.offset_click(x, y, off) for off in config.SACK_OFFSETS]
 
 
+class SeedUnavailable(RuntimeError):
+    """A semente não está disponível para este jogador (nível) ou não foi achada na loja."""
+
+
+def refresh_available_crops(g: Game) -> None:
+    """Sementes que o nível do jogador libera: catálogo do jogo (unlock_level de cada semente) x nível atual."""
+    cat = (g.link.api("/api/catalog/items") or {}).get("j") or {}
+    xp = (g.link.api("/api/xp/state") or {}).get("j") or {}
+    level = xp.get("level")
+    if not cat or level is None:
+        return
+    ok = set()
+    for it in cat.get("items", []):
+        st = (it.get("gameplay_stats") or {}).get("seed_type")
+        if it.get("category") == "crop" and st and int(it.get("unlock_level", 0) or 0) <= int(level):
+            ok.add(st)
+    if ok:
+        if g.avail_crops != ok:
+            log.info("[PLANTIO] sementes liberadas no seu nível (%s): %s", level, ", ".join(sorted(ok)))
+        g.avail_crops = ok
+
+
+def _crop_usable(g: Game, c: str) -> bool:
+    return c in config.SHOP_SEED and (g.avail_crops is None or c in g.avail_crops) and g.bad_crops.get(c, 0) < time.time()
+
+
+def _occupied(g: Game, margin: int) -> set[tuple[int, int]]:
+    """Tiles ocupados (prédios, plantas, árvores, sacos) com folga; vale para qualquer âncora de objeto."""
+    occ: set[tuple[int, int]] = set()
+    for o in g.link.objects():
+        sx, sy = int(o.get("sx", 1) or 1), int(o.get("sy", 1) or 1)
+        for i in range(-sx - margin + 1, sx + margin):
+            for j in range(-sy - margin + 1, sy + margin):
+                occ.add((o["x"] + i, o["y"] + j))
+    return occ
+
+
+def _sack_candidates(g: Game, near: tuple[int, int]) -> list[tuple[int, int]]:
+    """Tiles para soltar o saco, em ordem de preferência: fila à esquerda da linha das colmeias; depois os mais livres perto do canteiro."""
+    size = g._grid_size()
+    out: list[tuple[int, int]] = []
+    hives = g.link.objects("beehouse")
+    if config.SACK_ROW_FROM_BEEHIVES and hives:
+        occ0 = _occupied(g, 0)
+        row = Counter(h["y"] for h in hives).most_common(1)[0][0]
+        x = min(h["x"] for h in hives) - 1
+        while x >= 0 and len(out) < 6:
+            if (x, row) not in occ0:
+                out.append((x, row))
+            x -= 1
+    occ1 = _occupied(g, 1)
+    rest = sorted(((abs(x - near[0]) + abs(y - near[1]), (x, y)) for x in range(1, size - 1) for y in range(1, size - 1)
+                   if (x, y) not in occ1))
+    out += [t for _, t in rest[:14] if t not in out]
+    return out
+
+
+def _tile_is_free(g: Game, t: tuple[int, int]) -> bool:
+    """Confere NA TELA se o tile existe e está livre: o jogo só destaca (tracinhos brancos) tiles livres sob o mouse."""
+    if g.dry:
+        return True
+    x, y = g.grid.p(*t)
+    return tileprobe.Prober(g.page).present(x, y, g.grid.ax, g.grid.ay)
+
+
+def _wait_sack(g: Game, crop: str, n: int, drop: tuple[int, int], timeout: float = 70.0) -> bool:
+    """O saco comprado realmente apareceu na grama (estado salvo do jogo)? Só então dá para plantar com ele."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            g.link.refresh(timeout=30)
+        except TimeoutError:
+            continue
+        for s in g.link.objects("seed_sack"):
+            d = s.get("data", {})
+            if d.get("seed_type") == crop and d.get("count", 0) >= n and abs(s["x"] - drop[0]) <= 1 and abs(s["y"] - drop[1]) <= 1:
+                return True
+    return False
+
+
 def _buy_and_place(g: Game, crop: str, n: int) -> list[tuple[float, float]]:
-    """Compra `n` sementes de `crop` (o saco vem no cursor), solta o saco na grama e devolve os pontos para pegá-lo."""
-    log.info("[PLANTIO] comprando %d sementes de %s", n, crop)
+    """Compra `n` sementes de `crop` (o saco vem no cursor), solta o saco num tile LIVRE (conferido na tela) e CONFERE que o saco
+    existe antes de devolver os pontos para pegá-lo. Semente que não existe na loja deste jogador: SeedUnavailable (sem comprar)."""
+    if not _crop_usable(g, crop):
+        raise SeedUnavailable(f"{crop}: indisponível para este jogador")
+    field = [(o["x"], o["y"]) for o in _soils(g)]
+    near = (min(x for x, _ in field) - 2, min(y for _, y in field)) if field else (8, 12)
+    g.hand()
+    drop = None
+    for cand in _sack_candidates(g, near):               # 1) tile livre confirmado ANTES de abrir a loja
+        if _tile_is_free(g, cand):
+            drop = cand
+            break
+        log.info("[SACO] o tile (%d,%d) não aceita o saco (ocupado ou fora da land); tentando outro", *cand)
+    if drop is None:
+        raise RuntimeError("não achei um tile livre (confirmado na tela) para soltar o saco de sementes")
+    log.info("[PLANTIO] comprando %d sementes de %s (saco no tile %d,%d)", n, crop, *drop)
     g.click_ui("shop_button")
     g.pause(1.0, 1.5)
-    g.click(tuple(v * g.ui_scale for v in config.SHOP_SEED[crop]), note=f"semente {crop}", ui=True)
+    g.click_ui("shop_tab_seeds")                         # a loja lembra a última aba (árvores, animais...): volta para SEEDS
+    g.pause(0.6, 0.9)
+    cards = {} if g.dry else shopscan.scan(g.page)       # 2) acha a semente pelo ícone, onde ela estiver na grade
+    if not g.dry and crop not in cards:
+        g.click_ui("shop_close")
+        g.escape()
+        g.bad_crops[crop] = time.time() + 3600
+        log.warning("[PLANTIO] a semente %s não está na loja deste jogador (nível mais baixo?); não comprei nada e vou ignorá-la por 1 h. "
+                    "Sementes que achei: %s", crop, ", ".join(sorted(cards)) or "nenhuma")
+        raise SeedUnavailable(crop)
+    if not g.dry:
+        g.click(cards[crop], note=f"semente {crop}", ui=True)
     qty = g.ui("shop_qty")
     if not g.dry:
         g.page.mouse.click(*qty, click_count=3)
         g.page.keyboard.type(str(n))
     g.pause(0.8, 1.2)
     g.click_ui("shop_buy")
-    field = [(o["x"], o["y"]) for o in _soils(g)]
-    near = (min(x for x, _ in field) - 2, min(y for _, y in field)) if field else (8, 12)
-    gx, gy = _sack_tile(g, near)
-    g.click(g.grid.p(gx, gy), note="soltar saco na grama")   # o saco comprado vem no cursor; este clique o larga
-    return _sack_points(g, gx, gy)
+    g.click(g.grid.p(*drop), note="soltar saco na grama")   # o saco comprado vem no cursor; este clique o larga
+    if not g.dry and not _wait_sack(g, crop, n, drop):       # 3) só segue se o saco existe de verdade
+        g.buy_fail[crop] = g.buy_fail.get(crop, 0) + 1
+        if g.buy_fail[crop] >= 2:
+            g.bad_crops[crop] = time.time() + 1800
+            g.buy_fail[crop] = 0
+        raise RuntimeError(f"comprei {crop} mas o saco não apareceu na grama (tile {drop[0]},{drop[1]}); não vou plantar sem saco")
+    g.buy_fail[crop] = 0
+    return _sack_points(g, *drop)
 
 
 def _plant_batch(g: Game, crop: str, tiles: list[dict]) -> None:
@@ -480,20 +594,23 @@ def _ranking(g: Game) -> list[str]:
        pela ração com MENOS sacos (o que falta para ela é urgente).
     2) Todas as rações com FEED_MIN sacos ou mais: planta as culturas MAIS CARAS do mercado (preço da semente).
     O restante dos quadrantes é completado pelas culturas mais caras."""
-    all_crops = list(config.SHOP_SEED)
+    refresh_available_crops(g)
+    all_crops = [c for c in config.SHOP_SEED if _crop_usable(g, c)]
+    if not all_crops:
+        raise RuntimeError("nenhuma semente disponível para este jogador (nível/loja)")
     by_price = sorted(all_crops, key=lambda c: (-config.SEED_PRICE.get(c, 0), c))
     order: list[str] = []
     reasons: dict[str, str] = {}
     sacks = {r["output"]: g.inv.get(r["output"], 0) for r in g.recipes} if g.inv else {}
     for item, miss in sorted(g.demand.items(), key=lambda kv: -kv[1]):       # missões e pedidos de entrega (orders.py)
         c = _crop_of(item)
-        if miss > 0 and c in config.SHOP_SEED and c not in order:
+        if miss > 0 and c and _crop_usable(g, c) and c not in order:
             order.append(c)
             reasons[c] = f"missão/pedido precisa de {miss}"
     low = sorted((r for r in g.recipes if r["unlocked"] and r["output"] in sacks and sacks[r["output"]] < config.FEED_MIN),
                  key=lambda r: sacks[r["output"]])
     for r in low:                                    # ração mais escassa primeiro
-        need = sorted(((have / max(n, 1), item) for item, have, n in r["inputs"] if _crop_of(item) in config.SHOP_SEED))
+        need = sorted(((have / max(n, 1), item) for item, have, n in r["inputs"] if _crop_of(item) and _crop_usable(g, _crop_of(item))))
         for ratio, item in need:
             c = _crop_of(item)
             if ratio < config.STOCK_RATIO_TARGET and c not in order:   # ingrediente escasso (folhas vêm das árvores)
@@ -588,7 +705,12 @@ def crops(g: Game) -> None:
             by_crop.setdefault(crop, []).append(o)
         for crop, tiles in by_crop.items():
             for i in range(0, len(tiles), config.MAX_SACK):
-                _plant_batch(g, crop, tiles[i:i + config.MAX_SACK])
+                try:
+                    _plant_batch(g, crop, tiles[i:i + config.MAX_SACK])
+                except SeedUnavailable as e:         # sem essa semente: deixa os tiles vazios; o próximo plano usa outra cultura
+                    log.warning("[PLANTIO] %s; pulando essa cultura por enquanto", e)
+                    g.escape()
+                    break
         g.link.refresh()
         soils = _soils(g)
         wrong: Counter = Counter()
