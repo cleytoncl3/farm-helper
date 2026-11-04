@@ -495,6 +495,8 @@ def _buy_and_place(g: Game, crop: str, n: int) -> list[tuple[float, float]]:
         raise SeedUnavailable(f"{crop}: indisponível para este jogador")
     field = [(o["x"], o["y"]) for o in _soils(g)]
     near = (min(x for x, _ in field) - 2, min(y for _, y in field)) if field else (8, 12)
+    g.escape()                                           # solta qualquer saco que ainda esteja preso ao cursor (com ele o jogo não
+    g.tool = None                                        # mostra o destaque do tile e o teste de "tile livre" reprova todos)
     g.hand()
     drop = None
     for cand in _sack_candidates(g, near):               # 1) tile livre confirmado ANTES de abrir a loja

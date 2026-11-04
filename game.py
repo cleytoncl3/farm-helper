@@ -485,11 +485,18 @@ class Game:
         """O botão grande do diálogo da mina (COLLECT/START RUN em verde, DIGGING em cinza) está na tela?"""
         if self.dry:
             return True
+        if autocal.find_close_x(autocal.grab(self.page)) is None:      # sem o X vermelho de diálogo, nada está aberto
+            return False
         x, y = self.ui("mine_main")
-        r, g, b = self.pixel((x - 100 * self.ui_scale, y))      # lado esquerdo do botão (o centro tem o texto escuro)
-        green = g > 140 and r < 130 and b < 110 and g > r + 40
-        grey = abs(r - g) < 22 and abs(g - b) < 30 and 100 < r < 190
-        return green or grey
+        s = self.ui_scale
+        # o botão muda de largura/texto (START RUN + energia, COLLECT, DIGGING): olha vários pontos do lado esquerdo, fora do texto
+        for ox, oy in ((-140, 0), (-130, -9), (-130, 9), (-115, -9), (-115, 9), (-100, 0)):
+            r, g, b = self.pixel((x + ox * s, y + oy * s))
+            green = g > 140 and r < 150 and b < 120 and g > r + 40
+            grey = abs(r - g) < 22 and abs(g - b) < 30 and 100 < r < 190
+            if green or grey:
+                return True
+        return False
 
     # ---------------------------------------------------------------- saco de sementes
     def sack_attached(self, x: float, y: float, half: int = 36) -> bool:
