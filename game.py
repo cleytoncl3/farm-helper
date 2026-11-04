@@ -597,6 +597,9 @@ class Game:
         if e0 > config.ENERGY_BUY_AT:                     # trava final: nunca compra acima do limite
             raise EnergyWait(f"energia {e0:.0f} > {config.ENERGY_BUY_AT}: compra cancelada")
         log.info("[ENERGIA] energia %.0f (acabou); comprando pacote BEST VALUE (token de testnet)", e0)
+        self.close_dialogs()                              # saco de sementes preso ao cursor ou janela aberta engolem o clique no "+"
+        self.escape()
+        self.tool = None
         self.click_ui("energy_plus")
         self.click_ui("energy_best_buy")
         self.pause(1.5, 2.5)
